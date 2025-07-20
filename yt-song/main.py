@@ -20,66 +20,51 @@ def log(msg: str):
 def sanitize(text: str) -> str:
     return "".join(c if c.isalnum() or c in " -_()" else "_" for c in text).strip()
 
+
+import subprocess
+
+
 @app.post("/download")
 def download(url: str = Form(...), folder: str = Form(...)):
     try:
-        # Clear previous logs
-        with log_lock:
-            logs.clear()
-
+        logs.clear()
         sanitized_folder = sanitize(folder)
         folder_path = os.path.join(BASE_DIR, sanitized_folder)
         os.makedirs(folder_path, exist_ok=True)
 
-        log("[DEBUG] Starting metadata fetch...")
-        ydl_opts_meta = {'quiet': True, 'noplaylist': True}
-        with yt_dlp.YoutubeDL(ydl_opts_meta) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'audio')
-            log(f"[DEBUG] Fetched title: {title}")
-            safe_title = sanitize(title)
-            log(f"[DEBUG] Sanitized title: {safe_title}")
+        log("[DEBUG] Starting download using yt-dlp CLI with browser cookies...")
 
-        filename_template = os.path.join(folder_path, "%(title)s.%(ext)s")
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': filename_template,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-            }],
-            'postprocessor_args': ['-qscale:a', '0'],
-            'quiet': True,
-            'noplaylist': True,
-        }
+        command = [
+            "yt-dlp",
+            "--cookies-from-browser", "chrome",
+            "-f", "bestaudio",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--output", os.path.join(folder_path, "%(title)s.%(ext)s"),
+            url
+        ]
 
-        log("[DEBUG] Starting audio download...")
-        downloaded_file_path = None
-        def hook(d):
-            nonlocal downloaded_file_path
-            if d['status'] == 'finished':
-                downloaded_file_path = d['filename'].rsplit('.', 1)[0] + ".mp3"
-                log(f"[DEBUG] yt_dlp reported downloaded path: {downloaded_file_path}")
+        result = subprocess.run(command, capture_output=True, text=True)
 
-        ydl_opts['progress_hooks'] = [hook]
+        if result.returncode != 0:
+            log(f"[ERROR] yt-dlp failed: {result.stderr}")
+            return JSONResponse({"error": result.stderr})
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        log("[DEBUG] yt-dlp completed successfully")
 
-        if not downloaded_file_path or not os.path.exists(downloaded_file_path):
-            log(f"[ERROR] File not found: {downloaded_file_path}")
-            return JSONResponse({"error": "File not found after download."})
+        # Find the downloaded mp3 file
+        for fname in os.listdir(folder_path):
+            if fname.endswith(".mp3"):
+                mp3_path = os.path.join(folder_path, fname)
+                log(f"[INFO] MP3 file found: {mp3_path}")
+                return FileResponse(path=mp3_path, filename=fname, media_type="audio/mpeg")
 
-        log(f"[INFO] Download complete: {downloaded_file_path}")
-        return FileResponse(
-            path=downloaded_file_path,
-            filename=os.path.basename(downloaded_file_path),
-            media_type="audio/mpeg"
-        )
+        return JSONResponse({"error": "MP3 file not found after download."})
 
     except Exception as e:
         log(f"[ERROR] Exception: {str(e)}")
         return JSONResponse({"error": str(e)})
+
 
 @app.get("/logs")
 def get_logs():
