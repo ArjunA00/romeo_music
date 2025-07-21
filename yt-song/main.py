@@ -36,7 +36,6 @@ def download(url: str = Form(...), folder: str = Form(...)):
 
         command = [
             "yt-dlp",
-            "--cookies-from-browser", "chrome",
             "-f", "bestaudio",
             "--extract-audio",
             "--audio-format", "mp3",
