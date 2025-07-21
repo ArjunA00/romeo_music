@@ -39,6 +39,7 @@ def download(url: str = Form(...), folder: str = Form(...)):
             "-f", "bestaudio",
             "--extract-audio",
             "--no-check-certificate",
+            "--geo-bypass",
             "--audio-format", "mp3",
             "--output", os.path.join(folder_path, "%(title)s.%(ext)s"),
             url
